@@ -103,9 +103,9 @@ function categorizeCards(allCards, useOnlyAutouse) {
     return { eventCards, regularCards };
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Blocks creating
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function formatAlwaysCardsBlock(cards) {
     if (!cards || cards.length === 0) return null;
@@ -149,7 +149,7 @@ function formatRecallSingle(cards) {
     return `[The following information may be relevant to the current context:\n${items.join('\n')}]`;
 }
 
-function formatHierarchy(cards) {
+function formatHierarchy(cards, definedSet) {
     if (!cards || cards.length === 0) return null;
     let items = [];
     for (let i = 0; i < cards.length; i++) {
@@ -157,23 +157,61 @@ function formatHierarchy(cards) {
         let title = getCardTitle(card);
         let content = getCardText(card);
         if (!content) continue;
+        
         let indent = "  ".repeat(i);
         let parentNote = "";
         if (i > 0) {
             let parentTitle = getCardTitle(cards[i-1]);
             parentNote = ` (part of ${parentTitle})`;
         }
-        items.push(`${indent}• ${title}${parentNote}:\n${indent}  ${content};`);
+        
+        if (definedSet && definedSet.has(title)) {
+            if (i === 0) {
+                items.push(`${indent}• ${title}`);
+            } else {
+                items.push(`${indent}• ${title}${parentNote}`);
+            }
+        } else {
+            items.push(`${indent}• ${title}${parentNote}:\n${indent}  ${content};`);
+        }
     }
     if (items.length === 0) return null;
-    return `[Context hierarchy:\n${items.join('\n\n')}]`;
+    return items.join('\n');
 }
 
-function formatRecallCandidate(candidate) {
+function formatAllHierarchies(hierarchyStrings) {
+    if (!hierarchyStrings || hierarchyStrings.length === 0) return null;
+    let blocks = [];
+    for (let i = 0; i < hierarchyStrings.length; i++) {
+        blocks.push(`{Hierarchy ${i+1}.\n${hierarchyStrings[i]}}`);
+    }
+    let combined = blocks.join('\n\n');
+    return `[Current hierarchies (each sub-item is part of the parent item above):\n${combined}\n]`;
+}
+
+function formatDefinitionsBlock(cards) {
+    if (!cards || cards.length === 0) return null;
+    let items = [];
+    for (let card of cards) {
+        let title = getCardTitle(card);
+        let content = getCardText(card);
+        if (!content) continue;
+        let parentTitle = getCardParent(card);
+        let displayTitle = title;
+        if (parentTitle) {
+            displayTitle = `${title} (part of ${parentTitle})`;
+        }
+        items.push(`• ${displayTitle}:\n  ${content};`);
+    }
+    if (items.length === 0) return null;
+    return `[In the current context, the following terms refer to:\n${items.join('\n')}]`;
+}
+
+function formatRecallCandidate(candidate, definedSet) {
     if (candidate.type === 'single') {
         return formatRecallSingle(candidate.cards);
     } else {
-        return formatHierarchy(candidate.cards);
+        return formatHierarchy(candidate.cards, definedSet);
     }
 }
 
@@ -743,6 +781,7 @@ function StoryCardExtensionContext(text) {
     let { eventCards, regularCards } = categorizeCards(allCards, config.useOnlyAutouseCards);
 
     let usedCardTitles = new Set();
+    let definedTitlesSetForAll = new Set();
 
     let alwaysBlock = null;
     if (config.alwaysIncludeCards && config.alwaysIncludeCards.length > 0) {
@@ -817,7 +856,7 @@ function StoryCardExtensionContext(text) {
 
     if (config.contextRecallEnabled && regularCards.length > 0) {
         let candidates = selectRecallCandidates(text, allCards, regularCards, config);
-        
+
         let ancestorTitles = new Set();
         for (let cand of candidates) {
             if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
@@ -832,10 +871,96 @@ function StoryCardExtensionContext(text) {
             }
             return true;
         });
-        
+
+        definedTitlesSetForAll.clear();
+        let definitionCards = [];
         for (let cand of candidates) {
-            let block = formatRecallCandidate(cand);
-            if (block) recallBlocks.push(block);
+            if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
+                for (let i = 0; i < cand.cards.length - 1; i++) {
+                    let card = cand.cards[i];
+                    let title = getCardTitle(card);
+                    if (!definedTitlesSetForAll.has(title)) {
+                        definedTitlesSetForAll.add(title);
+                        definitionCards.push(card);
+                    }
+                }
+            }
+        }
+
+        let definitionsBlock = null;
+        if (definitionCards.length > 0) {
+            definitionsBlock = formatDefinitionsBlock(definitionCards);
+        }
+
+        let hierarchyStrings = [];
+        for (let cand of candidates) {
+            if (cand.type === 'hierarchy') {
+                let hasUndefinedCard = cand.cards.some(card => !definedTitlesSetForAll.has(getCardTitle(card)));
+                if (!hasUndefinedCard) {
+                    continue;
+                }
+                let hierStr = formatHierarchy(cand.cards, definedTitlesSetForAll);
+                if (hierStr) hierarchyStrings.push(hierStr);
+            }
+        }
+
+        let hierarchiesBlock = null;
+        if (hierarchyStrings.length > 0) {
+            hierarchiesBlock = formatAllHierarchies(hierarchyStrings);
+        }
+
+        let singleBlocks = [];
+        for (let cand of candidates) {
+            if (cand.type === 'single') {
+                let block = formatRecallSingle(cand.cards);
+                if (block) singleBlocks.push(block);
+            }
+        }
+
+        if (definitionsBlock) recallBlocks.push(definitionsBlock);
+        if (hierarchiesBlock) recallBlocks.push(hierarchiesBlock);
+        recallBlocks.push(...singleBlocks);
+    }
+
+    if (regularCards.length > 0 && Math.random() < config.randomCardChance) {
+        let selectedCard = config.useCardWeights
+            ? selectCardByWeight(regularCards)
+            : regularCards[Math.floor(Math.random() * regularCards.length)];
+        if (selectedCard) {
+            let title = getCardTitle(selectedCard);
+            if (!usedCardTitles.has(title)) {
+                let block = null;
+                let parent = getCardParent(selectedCard);
+                if (parent) {
+                    let hierarchy = getCardHierarchy(selectedCard, allCards);
+                    if (hierarchy && hierarchy.length) {
+                        let newCards = [];
+                        for (let card of hierarchy) {
+                            let t = getCardTitle(card);
+                            if (!usedCardTitles.has(t)) {
+                                newCards.push(card);
+                                usedCardTitles.add(t);
+                            }
+                        }
+                        if (newCards.length > 0) {
+                            let hierStr = formatHierarchy(newCards, definedTitlesSetForAll);
+                            if (hierStr) {
+                                block = `[Current hierarchies (each sub-item is part of the parent item above):\n${hierStr}\n]`;
+                            }
+                        }
+                    }
+                } else {
+                    block = formatRandomCard(selectedCard);
+                    if (block) usedCardTitles.add(title);
+                }
+                if (block) {
+                    if (config.recallInsertPosition === 'bot') {
+                        newText = newText + '\n\n' + block;
+                    } else {
+                        newText = block + '\n\n' + newText;
+                    }
+                }
+            }
         }
     }
 
@@ -849,27 +974,6 @@ function StoryCardExtensionContext(text) {
 
     if (alwaysBlock) {
         newText = alwaysBlock + '\n\n' + newText;
-    }
-
-    let eligibleRandom = regularCards.filter(c => !getCardParent(c));
-    if (eligibleRandom.length > 0 && Math.random() < config.randomCardChance) {
-        let selectedCard = config.useCardWeights
-            ? selectCardByWeight(eligibleRandom)
-            : eligibleRandom[Math.floor(Math.random() * eligibleRandom.length)];
-        if (selectedCard) {
-            let title = getCardTitle(selectedCard);
-            if (!usedCardTitles.has(title)) {
-                let block = formatRandomCard(selectedCard);
-                if (block) {
-                    if (config.recallInsertPosition === 'bot') {
-                        newText = newText + '\n\n' + block;
-                    } else {
-                        newText = block + '\n\n' + newText;
-                    }
-                    usedCardTitles.add(title);
-                }
-            }
-        }
     }
 
     if (state.currentEvent.duration > 0) {
