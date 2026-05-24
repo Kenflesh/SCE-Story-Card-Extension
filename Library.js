@@ -145,7 +145,7 @@ function formatRecallSingle(cards) {
         let title = getCardTitle(card);
         let content = getCardText(card);
         if (content) {
-            items.push(`• ${title}:\n${content};`);
+            items.push(`• ${title}:\n{${content}};`);
         }
     }
     if (items.length === 0) return null;
@@ -172,7 +172,7 @@ function formatHierarchy(cards, definedSet) {
         if (definedSet && definedSet.has(title)) {
             continue; 
         } else {
-            items.push(`${breadcrumbs}: ${content}`);
+            items.push(`${breadcrumbs}:\n${content}`);
         }
     }
     
@@ -202,7 +202,7 @@ function formatDefinitionsBlock(cards) {
         if (parentTitle) {
             displayTitle = `${title} (part of ${parentTitle})`;
         }
-        items.push(`• ${displayTitle}:\n  ${content};`);
+        items.push(`• ${displayTitle}:\n{${content}};`);
     }
     if (items.length === 0) return null;
     return `[In the current context, the following terms refer to:\n${items.join('\n')}]`;
