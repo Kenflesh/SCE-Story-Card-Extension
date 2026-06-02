@@ -1,4 +1,4 @@
-# StoryCard Extension (README OLD, I'M LAZY NOW)
+# Story Card Extension (SCE) for AI Dungeon
 
 A simple script for AI Dungeon that fixes several major issues with Story Cards, which otherwise make the mechanic largely useless.
 
@@ -19,50 +19,28 @@ This script solves these problems by inserting selected Story Cards directly int
 Because the script only injects context rather than altering core mechanics, it does not break the generation system and allows cards to be used in a more flexible and intelligent way.
 
 ## Features
+The current implementation includes the following mechanics:
+• Recall - allows cards to automatically trigger if they match the context, without using Triggers.
+• Parent - You can assign cards to their parent card.
+• Event - an event creation function.
+• Always Include Cards - a simple function designed to shift context from PE or AN to a story card. 
+• Random Card - a function you might consider nonsensical, but which can be useful.
 
-### 1. Event System
+A brief description of how it works:
+• Recall - allows cards to automatically call themselves if they fit the context, without using Triggers. The script scans the last characters in the context (for example, 10,000 characters), "tokenizes" them, does the same for the cards, and removes common words like "the." Then, when generating a response, it checks the context against all cards, and if a card matches the context (there are many common words), the script inserts matching cards. You can increase or decrease a card's chance by setting weight=0, where 0 disables the match, and 10 increases the chance of that card by 10 times. The "percentage" of word matches can be specified in the card config.
 
-The script can trigger Story Cards as events with a configurable probability. When an event triggers, the narrative begins adapting to the event described in the card.
+• Parent - you can assign cards their parent card. This is useful if you don't want to accidentally end up in the other side of the world when entering the trigger word or using this script's functions. Recall, for example, will check the chance, including all Parent cards (a parent card can have its own parent, and so on ad infinitum), and insert the entire hierarchy into the context.
 
-To create an event:
+• Event - a function for creating events.
+You can create an Event card type so that it's called with a certain chance and remains in the context for a certain number of turns. Want to add variety to your scripts, for example, with a chance to break your character's weapon? The information that this is about to happen will be included in the context, and the AI ​​will somehow guide the story within this event.
 
-- Create a Story Card
-- Set **Type** to **Custom**
-- Enter `Event` as the custom type
-- Provide a title and description (for example: "Your weapon breaks")
+• Always Include Cards - a simple function designed to shift the context from PE or AN to the story card, but it's surprisingly useful.
+You enter the card names here, and the context sees them every turn as World Info. I don't understand why this is, but it works much more reliably than Plot Essentials or Author's Notes. For a simple example, if I write medieval fantasy in AN, I get a stove, refrigerator, and frying pan. But if I add such a card to the context, I don't get modern appliances; they simply stop appearing. I have no idea why this happens, but it works for me.
 
-Optional trigger parameters:
+• Random Card – a feature you might consider nonsense, but which could be useful.
+You know those situations where the plot is stuck and the AI ​​forces it to move forward by adding something unusual. "You never noticed," "appears out of nowhere," "knocks on your door," and so on. This feature allows you to do the same, adding cards into the context without any prerequisites. You can set a chance, and a random card can appear in the context, and the AI ​​will then decide whether to use it or not. It's like food for thought for it, so your 100 cults in Story Cards aren't useless if you never mentioned them.
 
-- `weight=5` — the event will appear five times more often than events with weight 1
-- `duration=5` — the number of turns during which the AI will treat the event as active
-
-### 2. Story Card Recall
-
-On each turn, the script may randomly recall one of your Story Cards and insert it into the context.
-
-Two modes are available:
-
-- Set `useOnlyAutouseCards=false` to allow all cards to be selected
-- Add the trigger `autouse` to specific cards if you want only certain cards to be eligible
-
-### 3. Persistent Context Cards
-
-You can force specific cards to always remain in the context.
-
-Example configuration: alwaysIncludeCards = ["Castle", "Demon Lord"]
-
-
-The AI will always keep these cards in memory without requiring trigger words or manual duplication of the information in Plot Essentials or Author's Note.
-
-## Why This Matters
-
-With this system, Story Cards stop being passive data that rarely affects the story. Instead, they actively influence the narrative by:
-
-- introducing events
-- reminding the AI about relevant world information
-- keeping important lore in memory
-
-This transforms Story Cards from a static reference system into a dynamic storytelling tool.
+(Detailed use instructions can be found in the script configuration file in the scenario containing this script)
 
 ## Why should you include this script in your scenario?
 The script is lightweight, configurable, and does not interfere with normal gameplay if you choose not to use specific features. It does not pollute the context with unnecessary data and does not consume generation output for internal scripting tasks.
