@@ -27,6 +27,7 @@ The current implementation includes the following mechanics:
 • Random Card - a function you might consider nonsensical, but which can be useful.
 
 A brief description of how it works:
+
 • Recall - allows cards to automatically call themselves if they fit the context, without using Triggers. The script scans the last characters in the context (for example, 10,000 characters), "tokenizes" them, does the same for the cards, and removes common words like "the." Then, when generating a response, it checks the context against all cards, and if a card matches the context (there are many common words), the script inserts matching cards. You can increase or decrease a card's chance by setting weight=0, where 0 disables the match, and 10 increases the chance of that card by 10 times. The "percentage" of word matches can be specified in the card config.
 
 • Parent - you can assign cards their parent card. This is useful if you don't want to accidentally end up in the other side of the world when entering the trigger word or using this script's functions. Recall, for example, will check the chance, including all Parent cards (a parent card can have its own parent, and so on ad infinitum), and insert the entire hierarchy into the context.
