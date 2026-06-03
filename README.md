@@ -81,6 +81,12 @@ After inserting the contents of all files, click the **Save** button located in 
 
 Once saved, the script will be active and you can immediately start your adventure.
 
+# WARNING
+There's just one important limitation: it doesn't work with the Optimized Context feature, which is available on some models.
+To disable it during gameplay, go to:
+Gameplay → AI Models → Memory System and disable Optimized Context.
+It simply disables my script (like some other scripts) from running, but instead increases the potential context.
+
 ### Using Multiple Scripts Together
 
 If you want to combine this script with other AI Dungeon scripts, read the comments inside the files.
