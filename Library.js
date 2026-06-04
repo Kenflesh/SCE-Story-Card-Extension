@@ -117,7 +117,7 @@ function formatAlwaysCardsBlock(cards) {
         let title = getCardTitle(card);
         let content = getCardText(card);
         if (content) {
-            entries.push(`${title}: ${content};`);
+            entries.push(`• ${title}:\n{${content}};`);
         }
     }
     if (entries.length === 0) return null;
@@ -135,7 +135,7 @@ function formatEventCard(card) {
     let title = getCardTitle(card);
     let content = getCardText(card);
     if (!content) return null;
-    return `[The following event may occur: ${title}. ${content}. Describe it if there are no contradictions.]`;
+    return `[The following event may occur:\n${title}:\n{${content}}\nDescribe it if there are no contradictions.]`;
 }
 
 function formatRecallSingle(cards) {
@@ -1110,16 +1110,20 @@ function StoryCardExtensionContext(text) {
             hierarchiesBlock = formatAllHierarchies(hierarchyStrings);
         }
 
-        let singleBlocks = [];
+        let singleCardsList = [];
         for (let cand of candidates) {
             if (cand.type === 'single') {
                 let title = getCardTitle(cand.card);
                 if (!usedCardTitles.has(title)) {
-                    let block = formatRecallSingle(cand.cards);
-                    if (block) singleBlocks.push(block);
+                    singleCardsList.push(cand.card);
                     usedCardTitles.add(title);
                 }
             }
+        }
+        let singleBlocks = [];
+        if (singleCardsList.length > 0) {
+            let block = formatRecallSingle(singleCardsList);
+            if (block) singleBlocks.push(block);
         }
 
         let fullRecallContent = [];
