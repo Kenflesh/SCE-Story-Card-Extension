@@ -746,18 +746,40 @@ function candidateToPlainText(cand) {
 // Recall candidates 
 // ============================================================================
 
-function selectRecallCandidates(text, allCards, regularCards, config) {
-    if (typeof state === 'undefined') { state = {}; }
-    if (!regularCards || regularCards.length === 0) {
-        console.log("[SCE] No regular cards for recall");
-        return [];
-    }
-    if (!state.__sceCardBags) state.__sceCardBags = {};
+function buildWeightMap(txt, contextWindow, customStop, decayRate) {
+    let cleanText = stripBrackets(txt);
+    let recentClean = cleanText.slice(-contextWindow);
+    let recentRaw = txt.slice(-contextWindow);
+    let tokensClean = simpleTokenize(recentClean, customStop);
+    let tokensRaw = simpleTokenize(recentRaw, customStop);
 
+    function makeMap(tokensArray) {
+        let map = new Map();
+        let n = tokensArray.length;
+        for (let i = 0; i < n; i++) {
+            let dist = n - 1 - i;
+            let w = Math.pow(decayRate, dist);
+            let token = tokensArray[i];
+            let existing = map.get(token) || 0;
+            if (w > existing) {
+                map.set(token, w);
+            }
+        }
+        return map;
+    }
+
+    return {
+        weightMapClean: makeMap(tokensClean),
+        weightMapRaw: makeMap(tokensRaw)
+    };
+}
+
+function ensureCardBags(regularCards, customStop, state) {
+    if (!state.__sceCardBags) state.__sceCardBags = {};
+    
     let currentSignature = getCardsSignature(regularCards);
     let needRebuild = (state.__sceRecallSignature !== currentSignature);
-    let customStop = config.customStopWords || [];
-
+    
     if (needRebuild) {
         let { bags, idfMap } = buildCardBags(regularCards, customStop);
         state.__sceCardBags = bags;
@@ -771,112 +793,101 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
             state.__sceIdfMap = idfMap;
         }
     }
+}
 
-    let decayRate = config.recallDecayRate !== undefined ? config.recallDecayRate : 1.0;
-    decayRate = Math.min(1.0, Math.max(0.0, decayRate));
+function selectSinglePassCandidates(text, allCards, regularCards, config, state) {
+    let customStop = config.customStopWords || [];
+    let decayRate = Math.min(1.0, Math.max(0.0, config.recallDecayRate !== undefined ? config.recallDecayRate : 1.0));
     let threshold = config.contextRecallThreshold !== undefined ? config.contextRecallThreshold : 0.001;
     let maxCards = config.contextRecallMaxCards || 1;
     let contextWindow = config.contextWindowChars || 3000;
-
-    function buildWeightMap(txt) {
-        let cleanText = stripBrackets(txt);
-        let recentClean = cleanText.slice(-contextWindow);
-        let recentRaw = txt.slice(-contextWindow);
-        let tokensClean = simpleTokenize(recentClean, customStop);
-        let tokensRaw = simpleTokenize(recentRaw, customStop);
-
-        function makeMap(tokensArray) {
-            let map = new Map();
-            let n = tokensArray.length;
-            for (let i = 0; i < n; i++) {
-                let dist = n - 1 - i;
-                let w = Math.pow(decayRate, dist);
-                let token = tokensArray[i];
-                let existing = map.get(token) || 0;
-                if (w > existing) {
-                    map.set(token, w);
-                }
-            }
-            return map;
+    
+    let { weightMapClean, weightMapRaw } = buildWeightMap(text, contextWindow, customStop, decayRate);
+    
+    let singles = [], hierarchies = [];
+    
+    // Single cards
+    for (let card of regularCards) {
+        let title = getCardTitle(card);
+        if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
+        if (getCardParent(card)) continue;
+        
+        let bag = state.__sceCardBags[title];
+        if (!bag || bag.tokens.length === 0) continue;
+        
+        let score = cardCoverageScore(bag.tokens, bag.norm, weightMapClean, state.__sceIdfMap);
+        if (score >= threshold) {
+            let weight = getCardWeight(card);
+            singles.push({
+                type: 'single',
+                card: card,
+                score: score,
+                weightedScore: score * weight,
+                cards: [card]
+            });
         }
-
-        return {
-            weightMapClean: makeMap(tokensClean),
-            weightMapRaw: makeMap(tokensRaw)
-        };
     }
-
-    if (!config.cascadeEnabled) {
-        let { weightMapClean, weightMapRaw } = buildWeightMap(text);
-        let singles = [], hierarchies = [];
-
-        for (let card of regularCards) {
-            let title = getCardTitle(card);
-            if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
-            if (getCardParent(card)) continue;
-
-            let bag = state.__sceCardBags[title];
-            if (!bag || bag.tokens.length === 0) continue;
-            let score = cardCoverageScore(bag.tokens, bag.norm, weightMapClean, state.__sceIdfMap);
-            if (score >= threshold) {
-                let weight = getCardWeight(card);
-                singles.push({
-                    type: 'single',
-                    card: card,
-                    score: score,
-                    weightedScore: score * weight,
-                    cards: [card]
-                });
-            }
+    
+    // Hierarchies
+    for (let card of regularCards) {
+        let title = getCardTitle(card);
+        if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
+        if (!getCardParent(card)) continue;
+        
+        let hierarchy = getCardHierarchy(card, allCards);
+        if (!hierarchy.length) continue;
+        
+        let hierarchyScore = hierarchySimilarity(hierarchy, weightMapRaw, customStop, state);
+        if (hierarchyScore >= threshold) {
+            let weight = getCardWeight(card);
+            hierarchies.push({
+                type: 'hierarchy',
+                hierarchy: hierarchy,
+                score: hierarchyScore,
+                weightedScore: hierarchyScore * weight,
+                leafCard: card,
+                cards: hierarchy
+            });
         }
-        for (let card of regularCards) {
-            let title = getCardTitle(card);
-            if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
-            if (!getCardParent(card)) continue;
-
-            let hierarchy = getCardHierarchy(card, allCards);
-            if (!hierarchy.length) continue;
-
-            let hierarchyScore = hierarchySimilarity(hierarchy, weightMapRaw, customStop, state);
-            if (hierarchyScore >= threshold) {
-                let weight = getCardWeight(card);
-                hierarchies.push({
-                    type: 'hierarchy',
-                    hierarchy: hierarchy,
-                    score: hierarchyScore,
-                    weightedScore: hierarchyScore * weight,
-                    leafCard: card,
-                    cards: hierarchy
-                });
-            }
-        }
-
-        let allCandidates = [...singles, ...hierarchies];
-        allCandidates.sort((a, b) => b.weightedScore - a.weightedScore);
-        let selected = allCandidates.slice(0, maxCards);
-        console.log(`[SCE] Single pass, selected: ${selected.length}`);
-        return selected;
     }
+    
+    let allCandidates = [...singles, ...hierarchies];
+    allCandidates.sort((a, b) => b.weightedScore - a.weightedScore);
+    let selected = allCandidates.slice(0, maxCards);
+    
+    console.log(`[SCE] Single pass, selected: ${selected.length}`);
+    return selected;
+}
 
+function selectCascadeCandidates(text, allCards, regularCards, config, state) {
+    let customStop = config.customStopWords || [];
+    let decayRate = Math.min(1.0, Math.max(0.0, config.recallDecayRate !== undefined ? config.recallDecayRate : 1.0));
+    let threshold = config.contextRecallThreshold !== undefined ? config.contextRecallThreshold : 0.001;
+    let maxCards = config.contextRecallMaxCards || 1;
+    let contextWindow = config.contextWindowChars || 3000;
     let cascadeMultiplier = config.cascadePriorityMultiplier || 1.0;
+    
     let workingText = text;
     let usedOverallTitles = new Set();
     let allSelected = [];
     let maxIterations = 10;
     let firstIteration = true;
-
+    
     for (let iter = 0; iter < maxIterations; iter++) {
-        let { weightMapClean, weightMapRaw } = buildWeightMap(workingText);
+        let { weightMapClean, weightMapRaw } = buildWeightMap(workingText, contextWindow, customStop, decayRate);
+        
         let singles = [], hierarchies = [];
-
+        
+        // Single cards
         for (let card of regularCards) {
             let title = getCardTitle(card);
             if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
             if (usedOverallTitles.has(title)) continue;
             if (getCardParent(card)) continue;
-
+            
             let bag = state.__sceCardBags[title];
             if (!bag || bag.tokens.length === 0) continue;
+            
             let score = cardCoverageScore(bag.tokens, bag.norm, weightMapClean, state.__sceIdfMap);
             if (score >= threshold) {
                 let weight = getCardWeight(card);
@@ -893,16 +904,17 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
                 });
             }
         }
-
+        
+        // Hierarchies
         for (let card of regularCards) {
             let title = getCardTitle(card);
             if (isEventCard(card) || title.toLowerCase().includes('config')) continue;
             if (!getCardParent(card)) continue;
             if (usedOverallTitles.has(title)) continue;
-
+            
             let hierarchy = getCardHierarchy(card, allCards);
             if (!hierarchy.length) continue;
-
+            
             let hierarchyScore = hierarchySimilarity(hierarchy, weightMapRaw, customStop, state);
             if (hierarchyScore >= threshold) {
                 let weight = getCardWeight(card);
@@ -920,14 +932,13 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
                 });
             }
         }
-
+        
         let candidatesThisRound = [...singles, ...hierarchies];
         if (candidatesThisRound.length === 0) break;
-
+        
         firstIteration = false;
-
         candidatesThisRound.sort((a, b) => b.weightedScore - a.weightedScore);
-
+        
         if (allSelected.length < maxCards) {
             let slotsLeft = maxCards - allSelected.length;
             let toAdd = candidatesThisRound.slice(0, slotsLeft);
@@ -944,16 +955,18 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
             for (let i = 1; i < allSelected.length; i++) {
                 if (allSelected[i].weightedScore < allSelected[worstIdx].weightedScore) worstIdx = i;
             }
+            
             let worstScore = allSelected[worstIdx].weightedScore;
-
             for (let cand of candidatesThisRound) {
                 if (cand.weightedScore <= worstScore) break;
+                
                 allSelected[worstIdx] = cand;
                 for (let c of cand.cards) {
                     usedOverallTitles.add(getCardTitle(c));
                 }
                 let block = candidateToPlainText(cand);
                 if (block) workingText += '\n' + block;
+                
                 worstScore = Infinity;
                 for (let i = 0; i < allSelected.length; i++) {
                     if (allSelected[i].weightedScore < worstScore) {
@@ -962,13 +975,32 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
                     }
                 }
             }
+            
             if (worstScore >= allSelected[worstIdx].weightedScore) break;
         }
     }
-
+    
     console.log(`[SCE] Cascade iterations completed, selected: ${allSelected.length}`);
     allSelected.sort((a, b) => b.weightedScore - a.weightedScore);
     return allSelected;
+}
+
+function selectRecallCandidates(text, allCards, regularCards, config) {
+    if (typeof state === 'undefined') { state = {}; }
+    
+    if (!regularCards || regularCards.length === 0) {
+        console.log("[SCE] No regular cards for recall");
+        return [];
+    }
+    
+    let customStop = config.customStopWords || [];
+    ensureCardBags(regularCards, customStop, state);
+    
+    if (!config.cascadeEnabled) {
+        return selectSinglePassCandidates(text, allCards, regularCards, config, state);
+    } else {
+        return selectCascadeCandidates(text, allCards, regularCards, config, state);
+    }
 }
 
 // ============================================================================
