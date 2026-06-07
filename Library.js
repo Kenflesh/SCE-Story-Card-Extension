@@ -1007,42 +1007,31 @@ function selectRecallCandidates(text, allCards, regularCards, config) {
 // Main
 // ============================================================================
 
-function StoryCardExtensionContext(text) {
-    if (typeof state === 'undefined') { state = {}; }
-
-    let configCard = ensureConfigCard();
-    if (!configCard) return text;
-
-    let config = readConfigFromCard(configCard);
-    let allCards = getAllStoryCards();
-    if (!allCards || allCards.length === 0) return text;
-
-    let { eventCards, regularCards } = categorizeCards(allCards, config.useOnlyAutouseCards);
-
-    let usedCardTitles = new Set();
-    let definedTitlesSetForAll = new Set();
-
-    let alwaysBlock = null;
-    if (config.alwaysIncludeCards && config.alwaysIncludeCards.length > 0) {
-        let cardMap = new Map();
-        for (let card of allCards) {
-            let title = getCardTitle(card);
-            if (title) cardMap.set(title, card);
-        }
-        let foundCards = [];
-        for (let name of config.alwaysIncludeCards) {
-            let card = cardMap.get(name);
-            if (card) {
-                let title = getCardTitle(card);
-                if (!usedCardTitles.has(title)) {
-                    foundCards.push(card);
-                    usedCardTitles.add(title);
-                }
+function processAlwaysIncludeCards(allCards, config, usedCardTitles) {
+    if (!config.alwaysIncludeCards || config.alwaysIncludeCards.length === 0) return null;
+    
+    const cardMap = new Map();
+    for (const card of allCards) {
+        const title = getCardTitle(card);
+        if (title) cardMap.set(title, card);
+    }
+    
+    const foundCards = [];
+    for (const name of config.alwaysIncludeCards) {
+        const card = cardMap.get(name);
+        if (card) {
+            const title = getCardTitle(card);
+            if (!usedCardTitles.has(title)) {
+                foundCards.push(card);
+                usedCardTitles.add(title);
             }
         }
-        alwaysBlock = formatAlwaysCardsBlock(foundCards);
     }
+    
+    return formatAlwaysCardsBlock(foundCards);
+}
 
+function detectRetryState(state) {
     if (typeof info !== 'undefined' && info.lastOutput !== undefined) {
         if (state.lastOutput === undefined) state.lastOutput = info.lastOutput;
         state.isRetry = (info.lastOutput === state.lastOutput);
@@ -1054,21 +1043,25 @@ function StoryCardExtensionContext(text) {
     } else {
         state.isRetry = false;
     }
+}
 
+function manageEventState(config, state, eventCards, configCard) {
     if (!state.currentEvent) {
         state.currentEvent = { text: null, title: null, duration: 0 };
     }
-
+    
     if (config.currentEventTitle === "" && state.currentEvent.duration > 0) {
         state.currentEvent = { text: null, title: null, duration: 0 };
         writeConfigToCard(configCard, config);
-    } else if (config.currentEventDurationLeft === 0 && state.currentEvent.duration > 0) {
+    }
+    else if (config.currentEventDurationLeft === 0 && state.currentEvent.duration > 0) {
         state.currentEvent = { text: null, title: null, duration: 0 };
         config.currentEventTitle = "";
         config.currentEventDurationLeft = 0;
         writeConfigToCard(configCard, config);
-    } else if (config.currentEventTitle !== "" && config.currentEventTitle !== state.currentEvent.title) {
-        let foundEvent = eventCards.find(c => getCardTitle(c) === config.currentEventTitle);
+    }
+    else if (config.currentEventTitle !== "" && config.currentEventTitle !== state.currentEvent.title) {
+        const foundEvent = eventCards.find(c => getCardTitle(c) === config.currentEventTitle);
         if (foundEvent) {
             state.currentEvent.text = formatEventCard(foundEvent);
             state.currentEvent.title = config.currentEventTitle;
@@ -1079,167 +1072,180 @@ function StoryCardExtensionContext(text) {
             config.currentEventDurationLeft = 0;
             writeConfigToCard(configCard, config);
         }
-    } else if (config.currentEventDurationLeft !== state.currentEvent.duration && config.currentEventTitle === state.currentEvent.title) {
+    }
+    else if (config.currentEventDurationLeft !== state.currentEvent.duration && config.currentEventTitle === state.currentEvent.title) {
         state.currentEvent.duration = config.currentEventDurationLeft;
     }
-
+    
     if (state.currentEvent.duration === 0 && state.currentEvent.title !== null) {
         state.currentEvent = { text: null, title: null, duration: 0 };
         config.currentEventTitle = "";
         config.currentEventDurationLeft = 0;
         writeConfigToCard(configCard, config);
     }
+}
 
-    let recallBlocks = []; 
-    let topRecallBlocks = [];
-
-    if (config.contextRecallEnabled && regularCards.length > 0) {
-        let candidates = selectRecallCandidates(text, allCards, regularCards, config);
-
-        let ancestorTitles = new Set();
-        for (let cand of candidates) {
-            if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
-                for (let i = 0; i < cand.cards.length - 1; i++) {
-                    ancestorTitles.add(getCardTitle(cand.cards[i]));
-                }
-            }
-        }
-        candidates = candidates.filter(cand => {
-            if (cand.type === 'single' && ancestorTitles.has(getCardTitle(cand.card))) {
-                return false;
-            }
-            return true;
-        });
-
-        definedTitlesSetForAll.clear();
-        let definitionCards = [];
-        for (let cand of candidates) {
-            if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
-                for (let i = 0; i < cand.cards.length - 1; i++) {
-                    let card = cand.cards[i];
-                    let title = getCardTitle(card);
-                    if (!definedTitlesSetForAll.has(title)) {
-                        definedTitlesSetForAll.add(title);
-                        definitionCards.push(card);
-                    }
-                }
-            }
-        }
-
-        let definitionsBlock = null;
-        if (definitionCards.length > 0) {
-            definitionsBlock = formatDefinitionsBlock(definitionCards);
-        }
-
-        let hierarchyStrings = [];
-        for (let cand of candidates) {
-            if (cand.type === 'hierarchy') {
-                let hasUndefinedCard = cand.cards.some(card => !definedTitlesSetForAll.has(getCardTitle(card)));
-                if (!hasUndefinedCard) {
-                    continue;
-                }
-                let hierStr = formatHierarchy(cand.cards, definedTitlesSetForAll);
-                if (hierStr) hierarchyStrings.push(hierStr);
-            }
-        }
-
-        let hierarchiesBlock = null;
-        if (hierarchyStrings.length > 0) {
-            hierarchiesBlock = formatAllHierarchies(hierarchyStrings);
-        }
-
-        let singleCardsList = [];
-        for (let cand of candidates) {
-            if (cand.type === 'single') {
-                let title = getCardTitle(cand.card);
-                if (!usedCardTitles.has(title)) {
-                    singleCardsList.push(cand.card);
-                    usedCardTitles.add(title);
-                }
-            }
-        }
-        let singleBlocks = [];
-        if (singleCardsList.length > 0) {
-            let block = formatRecallSingle(singleCardsList);
-            if (block) singleBlocks.push(block);
-        }
-
-        let fullRecallContent = [];
-        if (definitionsBlock) fullRecallContent.push(definitionsBlock);
-        if (hierarchiesBlock) fullRecallContent.push(hierarchiesBlock);
-        fullRecallContent.push(...singleBlocks);
-
-        if (fullRecallContent.length > 0) {
-            if (config.recallInsertPosition === 'bot') {
-                recallBlocks = fullRecallContent;
-            } else {
-                topRecallBlocks = fullRecallContent;
+function processRecallCandidates(text, allCards, regularCards, config, state, usedCardTitles, definedTitlesSetForAll) {
+    const topRecallBlocks = [];
+    const recallBlocks = [];
+    
+    if (!config.contextRecallEnabled || regularCards.length === 0) {
+        return { topRecallBlocks, recallBlocks };
+    }
+    
+    let candidates = selectRecallCandidates(text, allCards, regularCards, config);
+    
+    const ancestorTitles = new Set();
+    for (const cand of candidates) {
+        if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
+            for (let i = 0; i < cand.cards.length - 1; i++) {
+                ancestorTitles.add(getCardTitle(cand.cards[i]));
             }
         }
     }
-
-    let randomCardBlock = null;
-    if (regularCards.length > 0 && Math.random() < config.randomCardChance) {
-        let selectedCard = config.useCardWeights
-            ? selectCardByWeight(regularCards)
-            : regularCards[Math.floor(Math.random() * regularCards.length)];
-        if (selectedCard) {
-            let title = getCardTitle(selectedCard);
+    candidates = candidates.filter(cand => {
+        if (cand.type === 'single' && ancestorTitles.has(getCardTitle(cand.card))) {
+            return false;
+        }
+        return true;
+    });
+    
+    definedTitlesSetForAll.clear();
+    const definitionCards = [];
+    for (const cand of candidates) {
+        if (cand.type === 'hierarchy' && cand.cards && cand.cards.length > 1) {
+            for (let i = 0; i < cand.cards.length - 1; i++) {
+                const card = cand.cards[i];
+                const title = getCardTitle(card);
+                if (!definedTitlesSetForAll.has(title)) {
+                    definedTitlesSetForAll.add(title);
+                    definitionCards.push(card);
+                }
+            }
+        }
+    }
+    
+    const definitionsBlock = definitionCards.length > 0 ? formatDefinitionsBlock(definitionCards) : null;
+    
+    const hierarchyStrings = [];
+    for (const cand of candidates) {
+        if (cand.type === 'hierarchy') {
+            const hasUndefinedCard = cand.cards.some(card => !definedTitlesSetForAll.has(getCardTitle(card)));
+            if (!hasUndefinedCard) continue;
+            const hierStr = formatHierarchy(cand.cards, definedTitlesSetForAll);
+            if (hierStr) hierarchyStrings.push(hierStr);
+        }
+    }
+    const hierarchiesBlock = hierarchyStrings.length > 0 ? formatAllHierarchies(hierarchyStrings) : null;
+    
+    const singleCardsList = [];
+    for (const cand of candidates) {
+        if (cand.type === 'single') {
+            const title = getCardTitle(cand.card);
             if (!usedCardTitles.has(title)) {
-                let block = null;
-                let parent = getCardParent(selectedCard);
-                if (parent) {
-                    let hierarchy = getCardHierarchy(selectedCard, allCards);
-                    if (hierarchy && hierarchy.length) {
-                        let newCards = [];
-                        for (let card of hierarchy) {
-                            let t = getCardTitle(card);
-                            if (!usedCardTitles.has(t)) {
-                                newCards.push(card);
-                                usedCardTitles.add(t);
-                            }
-                        }
-                        if (newCards.length > 0) {
-                            let hierStr = formatHierarchy(newCards, definedTitlesSetForAll);
-                            if (hierStr) {
-                                block = `[Current hierarchies (each sub-item is part of the parent item above):\n${hierStr}\n]`;
-                            }
-                        }
-                    }
-                } else {
-                    block = formatRandomCard(selectedCard);
-                    if (block) usedCardTitles.add(title);
-                }
-                if (block) {
-                    randomCardBlock = block;
-                }
+                singleCardsList.push(cand.card);
+                usedCardTitles.add(title);
             }
         }
     }
+    const singleBlocks = [];
+    if (singleCardsList.length > 0) {
+        const block = formatRecallSingle(singleCardsList);
+        if (block) singleBlocks.push(block);
+    }
+    
+    const fullRecallContent = [];
+    if (definitionsBlock) fullRecallContent.push(definitionsBlock);
+    if (hierarchiesBlock) fullRecallContent.push(hierarchiesBlock);
+    fullRecallContent.push(...singleBlocks);
+    
+    if (fullRecallContent.length > 0) {
+        if (config.recallInsertPosition === 'bot') {
+            recallBlocks.push(...fullRecallContent);
+        } else {
+            topRecallBlocks.push(...fullRecallContent);
+        }
+    }
+    
+    return { topRecallBlocks, recallBlocks };
+}
 
+function formatRandomCardEntry(selectedCard, allCards, usedCardTitles, definedTitlesSetForAll) {
+    const parent = getCardParent(selectedCard);
+    let block = null;
+
+    if (parent) {
+        const hierarchy = getCardHierarchy(selectedCard, allCards);
+        if (hierarchy && hierarchy.length) {
+            const newCards = [];
+            for (const card of hierarchy) {
+                const t = getCardTitle(card);
+                if (!usedCardTitles.has(t)) {
+                    newCards.push(card);
+                    usedCardTitles.add(t);
+                }
+            }
+            if (newCards.length > 0) {
+                const hierStr = formatHierarchy(newCards, definedTitlesSetForAll);
+                if (hierStr) {
+                    block = `[Current hierarchies (each sub-item is part of the parent item above):\n${hierStr}\n]`;
+                }
+            }
+        }
+    } else {
+        const title = getCardTitle(selectedCard);
+        block = formatRandomCard(selectedCard);
+        if (block) usedCardTitles.add(title);
+    }
+
+    return block;
+}
+
+function processRandomCard(regularCards, allCards, config, usedCardTitles, definedTitlesSetForAll) {
+    if (regularCards.length === 0) return null;
+    if (Math.random() >= config.randomCardChance) return null;
+
+    const selectedCard = config.useCardWeights
+        ? selectCardByWeight(regularCards)
+        : regularCards[Math.floor(Math.random() * regularCards.length)];
+
+    if (!selectedCard) return null;
+
+    const title = getCardTitle(selectedCard);
+    if (usedCardTitles.has(title)) return null;
+
+    return formatRandomCardEntry(selectedCard, allCards, usedCardTitles, definedTitlesSetForAll);
+}
+
+function assembleFinalText(text, topRecallBlocks, recallBlocks, alwaysBlock, randomCardBlock, config) {
     let newText = text;
-
-    for (let block of topRecallBlocks) {
+    
+    for (const block of topRecallBlocks) {
         newText = block + '\n\n' + newText;
     }
-
-    let bottomBlocks = [];
-
+    
+    const bottomBlocks = [];
     if (alwaysBlock) bottomBlocks.push(alwaysBlock);
     if (config.recallInsertPosition === 'bot') {
         bottomBlocks.push(...recallBlocks);
     }
     if (randomCardBlock) bottomBlocks.push(randomCardBlock);
-
-    for (let block of bottomBlocks) {
+    
+    for (const block of bottomBlocks) {
         newText = newText + '\n\n' + block;
     }
+    
+    return newText;
+}
 
+function handleEventInText(newText, config, state, eventCards, configCard, usedCardTitles) {
+    let resultText = newText;
+    
     if (state.currentEvent.duration > 0) {
         if (state.currentEvent.text) {
-            let eventTitle = state.currentEvent.title;
+            const eventTitle = state.currentEvent.title;
             if (!usedCardTitles.has(eventTitle)) {
-                newText = newText + '\n\n' + state.currentEvent.text;
+                resultText = resultText + '\n\n' + state.currentEvent.text;
                 usedCardTitles.add(eventTitle);
             }
         }
@@ -1257,27 +1263,62 @@ function StoryCardExtensionContext(text) {
         }
     } else {
         if (eventCards.length > 0 && Math.random() < config.randomEventChance) {
-            let selectedCard = config.useEventWeights
+            const selectedCard = config.useEventWeights
                 ? selectEventByWeight(eventCards)
                 : eventCards[Math.floor(Math.random() * eventCards.length)];
             if (selectedCard) {
-                let title = getCardTitle(selectedCard);
+                const title = getCardTitle(selectedCard);
                 if (!usedCardTitles.has(title)) {
-                    let block = formatEventCard(selectedCard);
+                    const block = formatEventCard(selectedCard);
                     if (block) {
-                        let duration = getEventDuration(selectedCard, config.eventDuration);
+                        const duration = getEventDuration(selectedCard, config.eventDuration);
                         state.currentEvent = { text: block, title: title, duration: duration };
                         config.currentEventTitle = title;
                         config.currentEventDurationLeft = duration;
                         writeConfigToCard(configCard, config);
-                        newText = newText + '\n\n' + block;
+                        resultText = resultText + '\n\n' + block;
                         usedCardTitles.add(title);
                     }
                 }
             }
         }
     }
+    
+    return resultText;
+}
 
+function StoryCardExtensionContext(text) {
+    if (typeof state === 'undefined') { state = {}; }
+    
+    const configCard = ensureConfigCard();
+    if (!configCard) return text;
+    const config = readConfigFromCard(configCard);
+    const allCards = getAllStoryCards();
+    if (!allCards || allCards.length === 0) return text;
+    
+    const { eventCards, regularCards } = categorizeCards(allCards, config.useOnlyAutouseCards);
+    
+    const usedCardTitles = new Set();
+    let definedTitlesSetForAll = new Set();
+    
+    const alwaysBlock = processAlwaysIncludeCards(allCards, config, usedCardTitles);
+    
+    detectRetryState(state);
+    
+    manageEventState(config, state, eventCards, configCard);
+    
+    const { topRecallBlocks, recallBlocks } = processRecallCandidates(
+        text, allCards, regularCards, config, state, usedCardTitles, definedTitlesSetForAll
+    );
+    
+    const randomCardBlock = processRandomCard(
+        regularCards, allCards, config, usedCardTitles, definedTitlesSetForAll
+    );
+    
+    let newText = assembleFinalText(text, topRecallBlocks, recallBlocks, alwaysBlock, randomCardBlock, config);
+    
+    newText = handleEventInText(newText, config, state, eventCards, configCard, usedCardTitles);
+    
     return newText;
 }
 
