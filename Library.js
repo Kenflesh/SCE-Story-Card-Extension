@@ -341,17 +341,23 @@ function readConfigFromCard(card) {
     let content = getCardText(card);
     if (!content) return config;
 
-    try {
-        let parsed = JSON.parse(content);
-        if (typeof parsed === 'object' && parsed !== null) {
-            for (let key of Object.keys(DEFAULT_CONFIG)) {
-                if (parsed.hasOwnProperty(key)) {
-                    config[key] = parsed[key];
+    let trimmedContent = content.trim();
+    
+    if (trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) {
+        try {
+            let parsed = JSON.parse(trimmedContent);
+            if (typeof parsed === 'object' && parsed !== null) {
+                for (let key of Object.keys(DEFAULT_CONFIG)) {
+                    if (parsed.hasOwnProperty(key)) {
+                        config[key] = parsed[key];
+                    }
                 }
+                return config;
             }
-            return config;
+        } catch (e) {
+            console.warn("[SCE] Config card looks like JSON but failed to parse:", e.message);
         }
-    } catch (e) {}
+    }
 
     let lines = content.split('\n');
     for (let line of lines) {
