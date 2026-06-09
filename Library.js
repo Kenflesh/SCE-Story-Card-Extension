@@ -656,6 +656,12 @@ function buildCardBags(regularCards, customStopWords) {
         idfMap.set(token, idf);
     }
 
+    if (totalCards === 1 && idfMap.size > 0) {
+        for (let token of idfMap.keys()) {
+            idfMap.set(token, 1);
+        }
+    }
+    
     let bags = {};
     for (let { title, tokens } of tokenLists) {
         let cardNormSq = 0;
