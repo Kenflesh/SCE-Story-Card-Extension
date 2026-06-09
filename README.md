@@ -1,6 +1,14 @@
 # Story Card Extension (SCE 🃏) for AI Dungeon
 
-SCE 🃏 - a simple script for AI Dungeon that fixes several major issues with Story Cards, which otherwise make the mechanic largely useless.
+SCE 🃏 - a script that brings your world to life by requiring almost nothing from you.
+
+Just imagine that all your cards influence the world at once, and do not clutter your context.
+
+Story Cards will become an incredible, unparalleled tool.
+
+Script enhancing the experience for both players and scenario creators.
+
+![Story Card Extension Demo](other/Demo_Image.png)
 
 ## Problems With the Original System
 
