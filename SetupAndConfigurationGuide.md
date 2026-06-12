@@ -85,7 +85,7 @@ You should end up with something like this:
 globalThis.MainSettings = (class MainSettings {
 
 ...................................................
-............ Очень много текста скрипта Inner Self
+............ A lot of text in the Inner Self script.
 ...................................................
 
 } function isolateLSIv2(code, log, text, stop) { const console = Object.freeze({log}); try { eval(code); return [null, text, stop]; } catch (error) { return [error, text, stop]; } }
